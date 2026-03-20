@@ -9,7 +9,7 @@ Anthropic Messages API provider for [AgentWFY](https://agentwfy.com). Uses Claud
 
 ## Install
 
-Download the latest `anthropic-provider.plugins.awfy` from [Releases](https://github.com/AgentWFY/anthropic-provider-plugin/releases), then install it via the AgentWFY command palette or the Plugins view.
+Open the Plugins view in AgentWFY, find "anthropic-provider" in the registry, and click Install.
 
 ## Features
 
