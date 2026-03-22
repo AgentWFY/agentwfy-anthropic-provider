@@ -341,7 +341,7 @@
       authUrl.searchParams.set('code_challenge_method', 'S256');
       authUrl.searchParams.set('state', verifier);
 
-      await window.agentwfy.openExternal(authUrl.toString());
+      await window.agentwfy.openExternal({ url: authUrl.toString() });
       $('#codeSection').classList.remove('hidden');
       $('#authCode').focus();
       showStatus('After logging in, paste the authorization code below.', 'info');
