@@ -717,7 +717,9 @@ class AnthropicSession {
       if (!isRetryableStatus(response.status)) {
         const text = await response.text().catch(() => '')
         if (isContextOverflow(text) && await this._compactMessages()) {
-          this._stream()
+          this._stream().catch((err) => {
+            this._emitError(err instanceof Error ? err.message : String(err))
+          })
           return
         }
         this._emitError(`Anthropic API error (${response.status}): ${text || response.statusText}`)
@@ -915,7 +917,9 @@ class AnthropicSession {
         this._truncationRetries = 0
         this._emit({ type: 'done' })
       } else {
-        this._stream()
+        this._stream().catch((err) => {
+          this._emitError(err instanceof Error ? err.message : String(err))
+        })
       }
       return
     }
