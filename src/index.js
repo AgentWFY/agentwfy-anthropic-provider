@@ -598,7 +598,9 @@ class AnthropicSession {
     this._displayMessages.push({ role: 'user', blocks, timestamp: Date.now() })
     this._emit({ type: 'state_changed' })
 
-    this._stream()
+    this._stream().catch((err) => {
+      this._emitError(err instanceof Error ? err.message : String(err))
+    })
   }
 
   _handleExecJsResult(id, content, isError) {
@@ -633,7 +635,9 @@ class AnthropicSession {
     if (this._pendingToolIds.size === 0) {
       // All tool results received — safe to persist now
       this._emit({ type: 'state_changed' })
-      this._stream()
+      this._stream().catch((err) => {
+        this._emitError(err instanceof Error ? err.message : String(err))
+      })
     }
   }
 
