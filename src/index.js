@@ -26,6 +26,23 @@ function convertTools(tools) {
   return tools.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters }))
 }
 
+/** Convert a FileContent block to the appropriate Anthropic API content block */
+function fileToAnthropicBlock(file) {
+  if (file.mimeType.startsWith('image/')) {
+    return {
+      type: 'image',
+      source: { type: 'base64', media_type: file.mimeType, data: file.data },
+    }
+  }
+  if (file.mimeType === 'application/pdf') {
+    return {
+      type: 'document',
+      source: { type: 'base64', media_type: file.mimeType, data: file.data },
+    }
+  }
+  return null
+}
+
 // ── SSE parser ──
 
 async function* parseSSE(response) {
@@ -346,7 +363,7 @@ class AnthropicSession {
   send(event) {
     switch (event.type) {
       case 'user_message':
-        this._handleUserMessage(event.text, event.images)
+        this._handleUserMessage(event.text, event.files)
         break
       case 'exec_js_result':
         this._handleExecJsResult(event.id, event.content, event.isError)
@@ -569,14 +586,12 @@ class AnthropicSession {
     }
   }
 
-  _handleUserMessage(text, images) {
+  _handleUserMessage(text, files) {
     const content = [{ type: 'text', text }]
-    if (images) {
-      for (const img of images) {
-        content.push({
-          type: 'image',
-          source: { type: 'base64', media_type: img.mimeType, data: img.data },
-        })
+    if (files) {
+      for (const f of files) {
+        const block = fileToAnthropicBlock(f)
+        if (block) content.push(block)
       }
     }
 
@@ -590,9 +605,9 @@ class AnthropicSession {
     }
 
     const blocks = [{ type: 'text', text }]
-    if (images) {
-      for (const img of images) {
-        blocks.push({ type: 'image', mimeType: img.mimeType, data: img.data })
+    if (files) {
+      for (const f of files) {
+        blocks.push({ type: 'file', mimeType: f.mimeType, data: f.data })
       }
     }
     this._displayMessages.push({ role: 'user', blocks, timestamp: Date.now() })
@@ -606,11 +621,9 @@ class AnthropicSession {
   _handleExecJsResult(id, content, isError) {
     const resultContent = content.map(c => {
       if (c.type === 'text') return { type: 'text', text: c.text }
-      if (c.type === 'image') {
-        return {
-          type: 'image',
-          source: { type: 'base64', media_type: c.mimeType, data: c.data },
-        }
+      if (c.type === 'file') {
+        const block = fileToAnthropicBlock(c)
+        return block ?? { type: 'text', text: '' }
       }
       return { type: 'text', text: '' }
     })
