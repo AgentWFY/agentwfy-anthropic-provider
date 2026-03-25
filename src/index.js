@@ -245,7 +245,7 @@ function addCacheBreakpoints(messages) {
     if (msg.role === 'user') {
       const content = msg.content
       if (content && content.length > 0) {
-        content[content.length - 1].cache_control = { type: 'ephemeral' }
+        content[content.length - 1].cache_control = { type: 'ephemeral', ttl: '1h' }
       }
       break
     }
@@ -627,15 +627,19 @@ class AnthropicSession {
       }
       return { type: 'text', text: '' }
     })
-    this._messages.push({
-      role: 'user',
-      content: [{
-        type: 'tool_result',
-        tool_use_id: id,
-        content: resultContent,
-        is_error: isError,
-      }],
-    })
+    const toolResultBlock = {
+      type: 'tool_result',
+      tool_use_id: id,
+      content: resultContent,
+      is_error: isError,
+    }
+    // Append to existing user message to preserve message structure for caching
+    const last = this._messages[this._messages.length - 1]
+    if (last && last.role === 'user') {
+      last.content.push(toolResultBlock)
+    } else {
+      this._messages.push({ role: 'user', content: [toolResultBlock] })
+    }
 
     const lastAssistant = this._displayMessages.length > 0
       ? this._displayMessages[this._displayMessages.length - 1]
@@ -672,7 +676,7 @@ class AnthropicSession {
 
     const system = [
       { type: 'text', text: "You are Claude Code, Anthropic's official CLI for Claude." },
-      { type: 'text', text: this._config.systemPrompt, cache_control: { type: 'ephemeral' } },
+      { type: 'text', text: this._config.systemPrompt, cache_control: { type: 'ephemeral', ttl: '1h' } },
     ]
 
     // Deep-copy messages for cache breakpoint mutation
