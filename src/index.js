@@ -1053,7 +1053,7 @@ function createFactory(getConfig, setConfig) {
     settingsView: 'plugin.anthropic-provider.settings',
 
     getStatusLine() {
-      return getConfig(CONFIG_KEYS.modelId, DEFAULT_MODEL_ID)
+      return formatModelName(getConfig(CONFIG_KEYS.modelId, DEFAULT_MODEL_ID))
     },
 
     createSession(config) {
