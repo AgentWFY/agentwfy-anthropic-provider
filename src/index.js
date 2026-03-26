@@ -5,6 +5,7 @@
 
 const PROVIDER_ID = 'anthropic'
 const DEFAULT_MODEL_ID = 'claude-sonnet-4-6'
+const TITLE_MODEL_ID = 'claude-haiku-4-5'
 const DEFAULT_BASE_URL = 'https://api.anthropic.com'
 
 const TOKEN_URL = 'https://platform.claude.com/v1/oauth/token'
@@ -336,7 +337,7 @@ async function getApiKey(getConfig, setConfig) {
 // ── Session class ──
 
 class AnthropicSession {
-  constructor(config, providerConfig, initialMessages, initialDisplayMessages) {
+  constructor(config, providerConfig, initialMessages, initialDisplayMessages, initialTitle) {
     this._config = config
     this._providerConfig = providerConfig
     this._messages = initialMessages ? initialMessages.slice() : []
@@ -349,6 +350,7 @@ class AnthropicSession {
     this._lastCacheCreationTokens = 0
     this._pendingToolIds = new Set()
     this._truncationRetries = 0
+    this._title = initialTitle || null
     if (initialMessages) {
       this._repairOrphanedToolUse()
       this._mergeConsecutiveSameRole()
@@ -421,7 +423,11 @@ class AnthropicSession {
   }
 
   getState() {
-    return { messages: this._messages.slice(), displayMessages: this._displayMessages.slice() }
+    return { messages: this._messages.slice(), displayMessages: this._displayMessages.slice(), title: this._title }
+  }
+
+  getTitle() {
+    return this._title
   }
 
   _buildStatusLine() {
@@ -442,6 +448,43 @@ class AnthropicSession {
 
   _emitStatusLine() {
     this._emit({ type: 'status_line', text: this._buildStatusLine() })
+  }
+
+  async _generateTitle(userMessage) {
+    try {
+      const apiKey = await this._providerConfig.getApiKey()
+      if (!apiKey) return
+
+      const response = await fetch(`${DEFAULT_BASE_URL}/v1/messages`, {
+        method: 'POST',
+        headers: this._buildHeaders(apiKey),
+        body: JSON.stringify({
+          model: TITLE_MODEL_ID,
+          messages: [{
+            role: 'user',
+            content: [{ type: 'text', text: userMessage.slice(0, 2000) }],
+          }],
+          system: [{ type: 'text', text: 'Generate a short session title (3-6 words) for a conversation that starts with the given user message. Respond with ONLY the title, no quotes, no punctuation at the end.' }],
+          max_tokens: 64,
+        }),
+      })
+
+      if (!response.ok) return
+
+      const result = await response.json()
+      const title = (result.content || [])
+        .filter(b => b.type === 'text')
+        .map(b => b.text)
+        .join('')
+        .trim()
+
+      if (title) {
+        this._title = title
+        this._emit({ type: 'state_changed' })
+      }
+    } catch (err) {
+      console.error('[anthropic-provider] Title generation error:', err)
+    }
   }
 
   _buildHeaders(apiKey) {
@@ -630,6 +673,10 @@ class AnthropicSession {
     }
     this._displayMessages.push({ role: 'user', blocks, timestamp: Date.now() })
     this._emit({ type: 'state_changed' })
+
+    if (this._messages.length === 1 && !this._title) {
+      this._generateTitle(text).catch(() => {})
+    }
 
     this._stream().catch((err) => {
       this._emitError(err instanceof Error ? err.message : String(err))
@@ -1017,7 +1064,8 @@ function createFactory(getConfig, setConfig) {
       const s = state || {}
       const apiMessages = Array.isArray(s.messages) ? s.messages : []
       const displayMessages = Array.isArray(s.displayMessages) ? s.displayMessages : []
-      return new AnthropicSession(config, readProviderConfig(), apiMessages, displayMessages)
+      const title = typeof s.title === 'string' ? s.title : undefined
+      return new AnthropicSession(config, readProviderConfig(), apiMessages, displayMessages, title)
     },
   }
 }
