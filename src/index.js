@@ -239,6 +239,13 @@ function formatTokens(tokens) {
   return String(tokens)
 }
 
+function formatModelName(modelId) {
+  const match = modelId.match(/claude-(\w+)-(\d+)-(\d+)/)
+  if (!match) return modelId
+  const name = match[1].charAt(0).toUpperCase() + match[1].slice(1)
+  return name + ' ' + match[2] + '.' + match[3]
+}
+
 function addCacheBreakpoints(messages) {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
@@ -337,6 +344,9 @@ class AnthropicSession {
     this._listeners = new Set()
     this._abortController = null
     this._lastInputTokens = 0
+    this._lastOutputTokens = 0
+    this._lastCacheReadTokens = 0
+    this._lastCacheCreationTokens = 0
     this._pendingToolIds = new Set()
     this._truncationRetries = 0
     if (initialMessages) {
@@ -415,9 +425,17 @@ class AnthropicSession {
   }
 
   _buildStatusLine() {
-    const parts = [this._providerConfig.modelId]
+    const parts = [formatModelName(this._providerConfig.modelId)]
     if (this._lastInputTokens > 0) {
-      parts.push(formatTokens(this._lastInputTokens))
+      const contextSize = this._lastInputTokens + this._lastOutputTokens
+      parts.push('ctx: ' + formatTokens(contextSize))
+      if (this._lastCacheReadTokens > 0 || this._lastCacheCreationTokens > 0) {
+        const cached = this._lastCacheReadTokens + this._lastCacheCreationTokens
+        parts.push('cache: ' + formatTokens(cached))
+      }
+      if (this._lastOutputTokens > 0) {
+        parts.push('+' + formatTokens(this._lastOutputTokens))
+      }
     }
     return parts.join(' · ')
   }
@@ -758,6 +776,9 @@ class AnthropicSession {
     const toolCalls = new Map()
     const pendingTools = []
     let inputTokens = 0
+    let outputTokens = 0
+    let cacheReadTokens = 0
+    let cacheCreationTokens = 0
     let currentBlockType = null
     let currentBlockIndex = -1
     let streamDone = false
@@ -779,9 +800,11 @@ class AnthropicSession {
           case 'message_start': {
             const message = data.message
             if (message && message.usage) {
+              cacheReadTokens = message.usage.cache_read_input_tokens || 0
+              cacheCreationTokens = message.usage.cache_creation_input_tokens || 0
               inputTokens = (message.usage.input_tokens || 0)
-                + (message.usage.cache_read_input_tokens || 0)
-                + (message.usage.cache_creation_input_tokens || 0)
+                + cacheReadTokens
+                + cacheCreationTokens
             }
             break
           }
@@ -858,6 +881,9 @@ class AnthropicSession {
           }
 
           case 'message_delta':
+            if (data.usage && data.usage.output_tokens) {
+              outputTokens = data.usage.output_tokens
+            }
             break
 
           case 'message_stop':
@@ -923,6 +949,9 @@ class AnthropicSession {
 
     if (inputTokens > 0) {
       this._lastInputTokens = inputTokens
+      this._lastOutputTokens = outputTokens
+      this._lastCacheReadTokens = cacheReadTokens
+      this._lastCacheCreationTokens = cacheCreationTokens
       this._emitStatusLine()
     }
 
