@@ -286,7 +286,7 @@
         params: [name],
       });
       if (rows.length === 0 || rows[0].value === null) return undefined;
-      try { return JSON.parse(rows[0].value); } catch { return undefined; }
+      return rows[0].value;
     }
 
     async function saveValue(name, value) {
@@ -294,7 +294,7 @@
         await window.agentwfy.runSql({
           target: 'agent',
           sql: 'UPDATE config SET value = ? WHERE name = ?',
-          params: [JSON.stringify(value), name],
+          params: [String(value), name],
         });
         return true;
       } catch (e) {
@@ -431,11 +431,11 @@
         });
         for (const row of rows) {
           if (row.value === null) continue;
-          const val = JSON.parse(row.value);
+          const val = row.value;
           if (row.name === KEYS.modelId) $('#modelId').value = val;
           else if (row.name === KEYS.maxTokens) $('#maxTokens').value = val || 16384;
-          else if (row.name === KEYS.hideThinking) $('#hideThinking').checked = !!val;
-          else if (row.name === KEYS.hideIntermediateSteps) $('#hideIntermediateSteps').checked = !!val;
+          else if (row.name === KEYS.hideThinking) $('#hideThinking').checked = val === 'true';
+          else if (row.name === KEYS.hideIntermediateSteps) $('#hideIntermediateSteps').checked = val === 'true';
         }
       } catch (e) {
         console.error('Failed to load config', e);

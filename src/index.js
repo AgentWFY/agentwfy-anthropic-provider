@@ -259,7 +259,7 @@ let _refreshLock = null
 async function getApiKey(getConfig, setConfig) {
   const access = getConfig(CONFIG_KEYS.oauthAccess, '')
   const refresh = getConfig(CONFIG_KEYS.oauthRefresh, '')
-  const expires = getConfig(CONFIG_KEYS.oauthExpires, 0)
+  const expires = Number(getConfig(CONFIG_KEYS.oauthExpires, '0'))
 
   if (!access || !refresh) {
     return ''
@@ -274,7 +274,7 @@ async function getApiKey(getConfig, setConfig) {
   if (_refreshLock) {
     await _refreshLock
     const updatedAccess = getConfig(CONFIG_KEYS.oauthAccess, '')
-    const updatedExpires = getConfig(CONFIG_KEYS.oauthExpires, 0)
+    const updatedExpires = Number(getConfig(CONFIG_KEYS.oauthExpires, '0'))
     if (updatedAccess && Date.now() < updatedExpires - 60_000) {
       return updatedAccess
     }
@@ -964,9 +964,9 @@ function createFactory(getConfig, setConfig) {
   function readProviderConfig() {
     return {
       modelId: getConfig(CONFIG_KEYS.modelId, DEFAULT_MODEL_ID),
-      maxTokens: getConfig(CONFIG_KEYS.maxTokens, 16384),
-      hideThinking: getConfig(CONFIG_KEYS.hideThinking, false),
-      hideIntermediateSteps: getConfig(CONFIG_KEYS.hideIntermediateSteps, false),
+      maxTokens: parseInt(getConfig(CONFIG_KEYS.maxTokens, '16384'), 10) || 16384,
+      hideThinking: getConfig(CONFIG_KEYS.hideThinking, 'false') === 'true',
+      hideIntermediateSteps: getConfig(CONFIG_KEYS.hideIntermediateSteps, 'false') === 'true',
       getApiKey: () => getApiKey(getConfig, setConfig),
     }
   }
