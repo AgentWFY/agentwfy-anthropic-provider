@@ -44,9 +44,20 @@ function fileToAnthropicBlock(file) {
   return null
 }
 
+// ── ProviderError ──
+
+class ProviderError extends Error {
+  constructor(message, category, retryAfterMs) {
+    super(message)
+    this.name = 'ProviderError'
+    this.category = category
+    this.retryAfterMs = retryAfterMs
+  }
+}
+
 // ── SSE parser ──
 
-async function* parseSSE(response) {
+async function* parseSSE(response, idleTimeoutMs = 90_000) {
   if (!response.body) throw new Error('Response body is null')
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
@@ -56,8 +67,21 @@ async function* parseSSE(response) {
 
   try {
     while (true) {
-      const { done, value } = await reader.read()
+      // Race read against idle timeout
+      let idleTimer
+      const { done, value } = await Promise.race([
+        reader.read(),
+        new Promise((_, reject) => {
+          idleTimer = setTimeout(
+            () => reject(new Error(`SSE idle timeout: no data received for ${Math.round(idleTimeoutMs / 1000)}s`)),
+            idleTimeoutMs,
+          )
+        }),
+      ]).finally(() => {
+        if (idleTimer !== undefined) clearTimeout(idleTimer)
+      })
       if (done) break
+
       buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split('\n')
       buffer = lines.pop() ?? ''
@@ -342,15 +366,14 @@ class AnthropicSession {
     this._providerConfig = providerConfig
     this._messages = initialMessages ? initialMessages.slice() : []
     this._displayMessages = initialDisplayMessages ? initialDisplayMessages.slice() : []
-    this._listeners = new Set()
     this._abortController = null
     this._lastInputTokens = 0
     this._lastOutputTokens = 0
     this._lastCacheReadTokens = 0
     this._lastCacheCreationTokens = 0
-    this._pendingToolIds = new Set()
     this._truncationRetries = 0
     this._title = initialTitle || null
+    this._partialAssistantMsg = null
     if (initialMessages) {
       this._repairOrphanedToolUse()
       this._mergeConsecutiveSameRole()
@@ -372,27 +395,28 @@ class AnthropicSession {
     return modified
   }
 
-  send(event) {
-    switch (event.type) {
-      case 'user_message':
-        this._handleUserMessage(event.text, event.files)
-        break
-      case 'exec_js_result':
-        this._handleExecJsResult(event.id, event.content, event.isError)
-        break
-      case 'abort':
-        if (this._abortController) this._abortController.abort()
-        break
+  async *stream(input, executeTool) {
+    this._addUserMessage(input.text, input.files)
+    yield { type: 'state_changed' }
+
+    if (this._messages.length === 1 && !this._title) {
+      this._generateTitle(input.text).catch(() => {})
     }
+
+    yield* this._doStream(executeTool)
   }
 
-  on(listener) {
-    this._listeners.add(listener)
-    listener({ type: 'status_line', text: this._buildStatusLine() })
+  async *retry(executeTool) {
+    this._discardPartialAssistant()
+    yield* this._doStream(executeTool)
   }
 
-  off(listener) {
-    this._listeners.delete(listener)
+  abort() {
+    if (this._abortController) this._abortController.abort()
+  }
+
+  dispose() {
+    this.abort()
   }
 
   getDisplayMessages() {
@@ -430,6 +454,8 @@ class AnthropicSession {
     return this._title
   }
 
+  // ── Private helpers ──
+
   _buildStatusLine() {
     const parts = [formatModelName(this._providerConfig.modelId)]
     if (this._lastInputTokens > 0) {
@@ -444,10 +470,6 @@ class AnthropicSession {
       }
     }
     return parts.join(' · ')
-  }
-
-  _emitStatusLine() {
-    this._emit({ type: 'status_line', text: this._buildStatusLine() })
   }
 
   async _generateTitle(userMessage) {
@@ -480,7 +502,6 @@ class AnthropicSession {
 
       if (title) {
         this._title = title
-        this._emit({ type: 'state_changed' })
       }
     } catch (err) {
       console.error('[anthropic-provider] Title generation error:', err)
@@ -496,6 +517,54 @@ class AnthropicSession {
       'user-agent': 'claude-cli/2.1.75',
       'x-app': 'cli',
       'anthropic-beta': BETA_HEADER,
+    }
+  }
+
+  _addUserMessage(text, files) {
+    const content = [{ type: 'text', text }]
+    if (files) {
+      for (const f of files) {
+        const block = fileToAnthropicBlock(f)
+        if (block) content.push(block)
+      }
+    }
+
+    // Anthropic requires strict role alternation. If the last message is already
+    // a user message (e.g. after repair merged tool_results), append to it.
+    const last = this._messages[this._messages.length - 1]
+    if (last && last.role === 'user') {
+      last.content = [...(Array.isArray(last.content) ? last.content : []), ...content]
+    } else {
+      this._messages.push({ role: 'user', content })
+    }
+
+    const blocks = [{ type: 'text', text }]
+    if (files) {
+      for (const f of files) {
+        blocks.push({ type: 'file', mimeType: f.mimeType, data: f.data })
+      }
+    }
+    this._displayMessages.push({ role: 'user', blocks, timestamp: Date.now() })
+  }
+
+  _discardPartialAssistant() {
+    // Remove partial display message from failed attempt
+    if (this._partialAssistantMsg) {
+      const idx = this._displayMessages.indexOf(this._partialAssistantMsg)
+      if (idx !== -1) this._displayMessages.splice(idx, 1)
+      this._partialAssistantMsg = null
+    }
+    // Remove trailing assistant messages and their tool_result user messages
+    while (this._messages.length > 0) {
+      const last = this._messages[this._messages.length - 1]
+      if (last.role === 'assistant') {
+        this._messages.pop()
+      } else if (last.role === 'user' && Array.isArray(last.content)
+        && last.content.every(b => b.type === 'tool_result')) {
+        this._messages.pop()
+      } else {
+        break
+      }
     }
   }
 
@@ -584,21 +653,7 @@ class AnthropicSession {
       blocks: [{ type: 'text', text: compactionText }],
       timestamp: Date.now(),
     })
-    this._emit({ type: 'state_changed' })
     return true
-  }
-
-  _emitError(error, partialBlocks) {
-    const blocks = partialBlocks ? [...partialBlocks] : []
-    blocks.push({ type: 'error', text: error })
-    this._displayMessages.push({ role: 'assistant', blocks, timestamp: Date.now() })
-    this._emit({ type: 'error', error })
-  }
-
-  _emit(event) {
-    for (const listener of this._listeners) {
-      listener(event)
-    }
   }
 
   _repairOrphanedToolUse() {
@@ -647,90 +702,13 @@ class AnthropicSession {
     }
   }
 
-  _handleUserMessage(text, files) {
-    const content = [{ type: 'text', text }]
-    if (files) {
-      for (const f of files) {
-        const block = fileToAnthropicBlock(f)
-        if (block) content.push(block)
-      }
-    }
-
-    // Anthropic requires strict role alternation. If the last message is already
-    // a user message (e.g. after repair merged tool_results), append to it.
-    const last = this._messages[this._messages.length - 1]
-    if (last && last.role === 'user') {
-      last.content = [...(Array.isArray(last.content) ? last.content : []), ...content]
-    } else {
-      this._messages.push({ role: 'user', content })
-    }
-
-    const blocks = [{ type: 'text', text }]
-    if (files) {
-      for (const f of files) {
-        blocks.push({ type: 'file', mimeType: f.mimeType, data: f.data })
-      }
-    }
-    this._displayMessages.push({ role: 'user', blocks, timestamp: Date.now() })
-    this._emit({ type: 'state_changed' })
-
-    if (this._messages.length === 1 && !this._title) {
-      this._generateTitle(text).catch(() => {})
-    }
-
-    this._stream().catch((err) => {
-      this._emitError(err instanceof Error ? err.message : String(err))
-    })
-  }
-
-  _handleExecJsResult(id, content, isError) {
-    const resultContent = content.map(c => {
-      if (c.type === 'text') return { type: 'text', text: c.text }
-      if (c.type === 'file') {
-        const block = fileToAnthropicBlock(c)
-        return block ?? { type: 'text', text: '' }
-      }
-      return { type: 'text', text: '' }
-    })
-    const toolResultBlock = {
-      type: 'tool_result',
-      tool_use_id: id,
-      content: resultContent,
-      is_error: isError,
-    }
-    // Append to existing user message to preserve message structure for caching
-    const last = this._messages[this._messages.length - 1]
-    if (last && last.role === 'user') {
-      last.content.push(toolResultBlock)
-    } else {
-      this._messages.push({ role: 'user', content: [toolResultBlock] })
-    }
-
-    const lastAssistant = this._displayMessages.length > 0
-      ? this._displayMessages[this._displayMessages.length - 1]
-      : null
-    if (lastAssistant && lastAssistant.role === 'assistant') {
-      lastAssistant.blocks.push({ type: 'exec_js_result', id, content, isError })
-    }
-
-    this._pendingToolIds.delete(id)
-    if (this._pendingToolIds.size === 0) {
-      // All tool results received — safe to persist now
-      this._emit({ type: 'state_changed' })
-      this._stream().catch((err) => {
-        this._emitError(err instanceof Error ? err.message : String(err))
-      })
-    }
-  }
-
-  async _stream() {
+  async *_doStream(executeTool) {
     this._abortController = new AbortController()
     const signal = this._abortController.signal
 
     const apiKey = await this._providerConfig.getApiKey()
     if (!apiKey) {
-      this._emitError('Not authenticated. Open provider settings to log in.')
-      return
+      throw new ProviderError('Not authenticated. Open provider settings to log in.', 'auth')
     }
 
     const modelId = this._providerConfig.modelId
@@ -762,30 +740,26 @@ class AnthropicSession {
     body.tools = convertTools(this._config.tools)
     body.thinking = { type: 'adaptive' }
 
-    this._emit({ type: 'start' })
-    this._emitStatusLine()
+    yield { type: 'status_line', text: this._buildStatusLine() }
 
     const bodyJson = JSON.stringify(body)
     let response
     let lastError = null
+    let lastStatus
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (attempt > 0) {
         try {
           await sleep(getRetryDelay(attempt - 1, response?.headers), signal)
         } catch {
-          this._emit({ type: 'done' })
-          return
+          return // aborted during retry sleep
         }
       }
 
       try {
         response = await fetch(url, { method: 'POST', headers, body: bodyJson, signal })
       } catch (err) {
-        if (signal.aborted) {
-          this._emit({ type: 'done' })
-          return
-        }
+        if (signal.aborted) return
         lastError = err instanceof Error ? err.message : String(err)
         continue // network error → retry
       }
@@ -795,26 +769,55 @@ class AnthropicSession {
         break
       }
 
+      lastStatus = response.status
+
       // Non-retryable error responses
       if (!isRetryableStatus(response.status)) {
         const text = await response.text().catch(() => '')
-        if (isContextOverflow(text) && await this._compactMessages()) {
-          this._stream().catch((err) => {
-            this._emitError(err instanceof Error ? err.message : String(err))
-          })
-          return
+
+        // Context overflow — try compaction
+        if (isContextOverflow(text)) {
+          if (await this._compactMessages()) {
+            yield { type: 'state_changed' }
+            yield* this._doStream(executeTool)
+            return
+          }
+          throw new ProviderError(
+            `Context overflow: ${text || response.statusText}`,
+            'context_overflow',
+          )
         }
-        this._emitError(`Anthropic API error (${response.status}): ${text || response.statusText}`)
-        return
+
+        // Auth errors
+        if (response.status === 401 || response.status === 403) {
+          throw new ProviderError(
+            `Anthropic API error (${response.status}): ${text || response.statusText}`,
+            'auth',
+          )
+        }
+
+        // Other non-retryable
+        throw new ProviderError(
+          `Anthropic API error (${response.status}): ${text || response.statusText}`,
+          'invalid_request',
+        )
       }
 
       // Retryable status — consume body before retry
       lastError = `Anthropic API error (${response.status}): ${await response.text().catch(() => response.statusText)}`
     }
 
-    if (lastError) {
-      this._emitError(lastError)
-      return
+    // Provider retry exhausted
+    if (lastError || !response?.ok) {
+      const msg = lastError ?? 'Request failed'
+      if (lastStatus === 429) {
+        const retryAfterMs = response?.headers ? getRetryDelay(MAX_RETRIES, response.headers) : undefined
+        throw new ProviderError(msg, 'rate_limit', retryAfterMs)
+      }
+      if (lastStatus >= 500 || lastStatus === 529) {
+        throw new ProviderError(msg, 'server')
+      }
+      throw new ProviderError(msg, 'network')
     }
 
     let assistantText = ''
@@ -886,13 +889,13 @@ class AnthropicSession {
               assistantText += delta.text
               const textBlock = assistantContent[contentIndex]
               if (textBlock) textBlock.text = (textBlock.text || '') + delta.text
-              this._emit({ type: 'text_delta', delta: delta.text })
+              yield { type: 'text_delta', delta: delta.text }
             } else if (deltaType === 'thinking_delta' && typeof delta.thinking === 'string') {
               thinkingText += delta.thinking
               const thinkBlock = assistantContent[contentIndex]
               if (thinkBlock) thinkBlock.thinking = (thinkBlock.thinking || '') + delta.thinking
               if (!this._providerConfig.hideThinking) {
-                this._emit({ type: 'thinking_delta', delta: delta.thinking })
+                yield { type: 'thinking_delta', delta: delta.thinking }
               }
             } else if (deltaType === 'signature_delta' && typeof delta.signature === 'string') {
               const thinkBlock = assistantContent[contentIndex]
@@ -940,25 +943,20 @@ class AnthropicSession {
           case 'error': {
             const error = data.error
             const msg = (error && error.message) ? error.message : 'Unknown Anthropic API error'
-            const partialBlocks = []
-            if (thinkingText) partialBlocks.push({ type: 'thinking', text: thinkingText })
-            if (assistantText) partialBlocks.push({ type: 'text', text: assistantText })
-            this._emitError(msg, partialBlocks)
-            return
+            throw new ProviderError(msg, 'server')
           }
         }
       }
     } catch (err) {
-      if (signal.aborted) {
-        this._emit({ type: 'done' })
-        return
-      }
-      const partialBlocks = []
-      if (thinkingText) partialBlocks.push({ type: 'thinking', text: thinkingText })
-      if (assistantText) partialBlocks.push({ type: 'text', text: assistantText })
-      this._emitError(err instanceof Error ? err.message : String(err), partialBlocks)
-      return
+      if (signal.aborted) return
+      // Re-throw ProviderError as-is
+      if (err instanceof ProviderError) throw err
+      // SSE parse error or idle timeout — classify as network
+      const message = err instanceof Error ? err.message : String(err)
+      throw new ProviderError(message, 'network')
     }
+
+    if (signal.aborted) return
 
     // Handle tool_use blocks that were started but never finalized
     // (no content_block_stop — happens when max_tokens truncates mid-block).
@@ -992,45 +990,89 @@ class AnthropicSession {
     for (const pt of pendingTools) {
       blocks.push({ type: 'exec_js', id: pt.id, description: pt.description, code: pt.code })
     }
-    this._displayMessages.push({ role: 'assistant', blocks, timestamp: Date.now() })
+    const displayMsg = { role: 'assistant', blocks, timestamp: Date.now() }
+    this._displayMessages.push(displayMsg)
+    this._partialAssistantMsg = (pendingTools.length > 0 || truncatedToolIds.length > 0) ? displayMsg : null
 
     if (inputTokens > 0) {
       this._lastInputTokens = inputTokens
       this._lastOutputTokens = outputTokens
       this._lastCacheReadTokens = cacheReadTokens
       this._lastCacheCreationTokens = cacheCreationTokens
-      this._emitStatusLine()
+      yield { type: 'status_line', text: this._buildStatusLine() }
     }
 
     // Truncated tool calls: persist and auto-retry so the model sees the error
     if (truncatedToolIds.length > 0) {
       this._truncationRetries++
-      this._emit({ type: 'state_changed' })
+      yield { type: 'state_changed' }
       if (this._truncationRetries > 3) {
         this._truncationRetries = 0
-        this._emit({ type: 'done' })
-      } else {
-        this._stream().catch((err) => {
-          this._emitError(err instanceof Error ? err.message : String(err))
-        })
+        return
       }
+      yield* this._doStream(executeTool)
       return
     }
     this._truncationRetries = 0
 
+    // Execute tools if any
     if (pendingTools.length > 0) {
+      // Yield exec_js for all tools (so UI shows them)
       for (const pt of pendingTools) {
-        this._pendingToolIds.add(pt.id)
+        yield { type: 'exec_js', id: pt.id, description: pt.description, code: pt.code }
       }
-      for (const pt of pendingTools) {
-        this._emit({ type: 'exec_js', id: pt.id, description: pt.description, code: pt.code })
+
+      // Execute tools in parallel
+      const results = await Promise.all(
+        pendingTools.map(pt => executeTool(pt)),
+      )
+
+      // Process results
+      for (let i = 0; i < pendingTools.length; i++) {
+        const pt = pendingTools[i]
+        const result = results[i]
+        const resultContent = result.content.map(c => {
+          if (c.type === 'text') return { type: 'text', text: c.text }
+          if (c.type === 'file') {
+            const block = fileToAnthropicBlock(c)
+            return block ?? { type: 'text', text: '' }
+          }
+          return { type: 'text', text: '' }
+        })
+        const toolResultBlock = {
+          type: 'tool_result',
+          tool_use_id: pt.id,
+          content: resultContent,
+          is_error: result.isError,
+        }
+        // Append to existing user message to preserve message structure for caching
+        const last = this._messages[this._messages.length - 1]
+        if (last && last.role === 'user') {
+          last.content.push(toolResultBlock)
+        } else {
+          this._messages.push({ role: 'user', content: [toolResultBlock] })
+        }
+
+        // Add exec_js_result block to the current assistant display message
+        const lastAssistant = this._displayMessages.length > 0
+          ? this._displayMessages[this._displayMessages.length - 1]
+          : null
+        if (lastAssistant && lastAssistant.role === 'assistant') {
+          lastAssistant.blocks.push({ type: 'exec_js_result', id: pt.id, content: result.content, isError: result.isError })
+        }
       }
+
+      this._partialAssistantMsg = null
+      yield { type: 'state_changed' }
+
+      // Continue streaming with tool results
+      yield* this._doStream(executeTool)
       return
     }
 
-    // No pending tools — safe to persist
-    this._emit({ type: 'state_changed' })
-    this._emit({ type: 'done' })
+    // No pending tools — done
+    this._partialAssistantMsg = null
+    yield { type: 'state_changed' }
   }
 }
 
