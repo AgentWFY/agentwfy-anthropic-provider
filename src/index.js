@@ -11,6 +11,10 @@ const DEFAULT_BASE_URL = 'https://api.anthropic.com'
 const TOKEN_URL = 'https://platform.claude.com/v1/oauth/token'
 const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
 const BETA_HEADER = 'claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14'
+const TOKEN_HEADERS = {
+  'Content-Type': 'application/json',
+  'User-Agent': 'claude-cli',
+}
 
 const CONFIG_KEYS = {
   modelId: 'plugin.anthropic-provider.modelId',
@@ -318,7 +322,7 @@ async function getApiKey(getConfig, setConfig) {
   try {
     const response = await fetch(TOKEN_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: TOKEN_HEADERS,
       body: JSON.stringify({
         grant_type: 'refresh_token',
         client_id: CLIENT_ID,
