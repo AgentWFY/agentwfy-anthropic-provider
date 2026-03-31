@@ -17,13 +17,13 @@ const TOKEN_HEADERS = {
 }
 
 const CONFIG_KEYS = {
-  modelId: 'plugin.anthropic-provider.modelId',
-  maxTokens: 'plugin.anthropic-provider.maxTokens',
-  oauthAccess: 'plugin.anthropic-provider.oauthAccess',
-  oauthRefresh: 'plugin.anthropic-provider.oauthRefresh',
-  oauthExpires: 'plugin.anthropic-provider.oauthExpires',
-  hideThinking: 'plugin.anthropic-provider.hideThinking',
-  hideIntermediateSteps: 'plugin.anthropic-provider.hideIntermediateSteps',
+  modelId: 'plugin.anthropic-provider.model-id',
+  maxTokens: 'plugin.anthropic-provider.max-tokens',
+  oauthAccess: 'plugin.anthropic-provider.oauth-access',
+  oauthRefresh: 'plugin.anthropic-provider.oauth-refresh',
+  oauthExpires: 'plugin.anthropic-provider.oauth-expires',
+  hideThinking: 'plugin.anthropic-provider.hide-thinking',
+  hideIntermediateSteps: 'plugin.anthropic-provider.hide-intermediate-steps',
 }
 
 /** Convert tools from ProviderSessionConfig format to Anthropic API format */
