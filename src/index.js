@@ -9,7 +9,7 @@ const TITLE_MODEL_ID = 'claude-haiku-4-5'
 const DEFAULT_BASE_URL = 'https://api.anthropic.com'
 
 const TOKEN_URL = 'https://platform.claude.com/v1/oauth/token'
-const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
+const CLIENT_ID = 'https://claude.ai/oauth/claude-code-client-metadata'
 const BETA_HEADER = 'claude-code-20250219,oauth-2025-04-20,fine-grained-tool-streaming-2025-05-14'
 const TOKEN_HEADERS = {
   'Content-Type': 'application/json',

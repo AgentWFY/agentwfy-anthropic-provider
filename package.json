@@ -1,6 +1,6 @@
 {
   "name": "agentwfy-plugin-anthropic-provider",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "title": "Anthropic Pro/Max Subscription Provider",
   "description": "Provider for Claude Pro/Max subscriptions with streaming, extended thinking, and cache control",
   "type": "module",

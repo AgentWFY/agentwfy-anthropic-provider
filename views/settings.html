@@ -221,11 +221,11 @@
     };
 
     const OAUTH = {
-      clientId: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
+      clientId: 'https://claude.ai/oauth/claude-code-client-metadata',
       authorizeUrl: 'https://platform.claude.com/oauth/authorize',
       tokenUrl: 'https://platform.claude.com/v1/oauth/token',
       redirectUri: 'https://platform.claude.com/oauth/code/callback',
-      scopes: 'org:create_api_key user:profile user:inference',
+      scopes: 'user:inference user:profile user:sessions:claude_code user:mcp_servers user:file_upload',
     };
 
     let _pkceVerifier = null;
