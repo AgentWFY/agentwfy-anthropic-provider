@@ -376,6 +376,7 @@ class AnthropicSession {
     this._lastCacheReadTokens = 0
     this._lastCacheCreationTokens = 0
     this._truncationRetries = 0
+    this._thinkingOverflowRetries = 0
     this._title = initialTitle || null
     this._partialAssistantMsg = null
     if (initialMessages) {
@@ -836,6 +837,8 @@ class AnthropicSession {
     let currentBlockType = null
     let currentBlockIndex = -1
     let streamDone = false
+    let stopReason = null
+    let lastKeepaliveAt = Date.now()
 
     try {
       for await (const sseEvent of parseSSE(response)) {
@@ -900,6 +903,10 @@ class AnthropicSession {
               if (thinkBlock) thinkBlock.thinking = (thinkBlock.thinking || '') + delta.thinking
               if (!this._providerConfig.hideThinking) {
                 yield { type: 'thinking_delta', delta: delta.thinking }
+              } else if (Date.now() - lastKeepaliveAt > 30_000) {
+                lastKeepaliveAt = Date.now()
+                const estimatedTokens = Math.round(thinkingText.length / 4)
+                yield { type: 'status_line', text: this._buildStatusLine() + ' · +~' + formatTokens(estimatedTokens) + ' thinking' }
               }
             } else if (deltaType === 'signature_delta' && typeof delta.signature === 'string') {
               const thinkBlock = assistantContent[contentIndex]
@@ -938,6 +945,9 @@ class AnthropicSession {
             if (data.usage && data.usage.output_tokens) {
               outputTokens = data.usage.output_tokens
             }
+            if (data.delta && data.delta.stop_reason) {
+              stopReason = data.delta.stop_reason
+            }
             break
 
           case 'message_stop':
@@ -961,6 +971,27 @@ class AnthropicSession {
     }
 
     if (signal.aborted) return
+
+    // Detect max_tokens exhaustion on thinking with no usable output
+    if (stopReason === 'max_tokens' && !assistantText && pendingTools.length === 0) {
+      this._thinkingOverflowRetries++
+      if (this._thinkingOverflowRetries > 2) {
+        this._thinkingOverflowRetries = 0
+        throw new ProviderError(
+          `Model used all ${formatTokens(outputTokens)} output tokens on reasoning without producing a response. Try increasing max tokens in provider settings, or simplify the request.`,
+          'context_overflow',
+        )
+      }
+      // Keep the thinking in history so the model sees its own work, then nudge it to respond
+      this._messages.push({ role: 'assistant', content: assistantContent })
+      this._messages.push({
+        role: 'user',
+        content: [{ type: 'text', text: 'Your previous response used all output tokens on reasoning without producing a visible response. Continue.' }],
+      })
+      yield { type: 'state_changed' }
+      yield* this._doStream(executeTool)
+      return
+    }
 
     // Handle tool_use blocks that were started but never finalized
     // (no content_block_stop — happens when max_tokens truncates mid-block).
@@ -1018,6 +1049,7 @@ class AnthropicSession {
       return
     }
     this._truncationRetries = 0
+    this._thinkingOverflowRetries = 0
 
     // Execute tools if any
     if (pendingTools.length > 0) {
