@@ -1063,6 +1063,12 @@ class AnthropicSession {
         pendingTools.map(pt => executeTool(pt)),
       )
 
+      // If aborted while tools were running, discard partial turn and stop
+      if (signal.aborted) {
+        this._discardPartialAssistant()
+        return
+      }
+
       // Process results
       for (let i = 0; i < pendingTools.length; i++) {
         const pt = pendingTools[i]
