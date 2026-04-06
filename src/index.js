@@ -934,6 +934,7 @@ class AnthropicSession {
                   name: entry.name,
                   description: typeof args.description === 'string' ? args.description : 'Executing code',
                   code: typeof args.code === 'string' ? args.code : '',
+                  ...(typeof args.timeoutMs === 'number' ? { timeoutMs: args.timeoutMs } : {}),
                 })
               }
             }
