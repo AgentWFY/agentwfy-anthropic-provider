@@ -985,9 +985,23 @@ class AnthropicSession {
       }
       // Keep the thinking in history so the model sees its own work, then nudge it to respond
       this._messages.push({ role: 'assistant', content: assistantContent })
+      // If the assistant message contains truncated tool_use blocks, we must
+      // include tool_result blocks in the follow-up user message so the API
+      // doesn't reject the request for orphaned tool_use ids.
+      const overflowToolResults = assistantContent
+        .filter(b => b.type === 'tool_use' && b.id)
+        .map(b => ({
+          type: 'tool_result',
+          tool_use_id: b.id,
+          content: 'Your response was truncated by the output token limit before this tool call could be completed.',
+          is_error: true,
+        }))
       this._messages.push({
         role: 'user',
-        content: [{ type: 'text', text: 'Your previous response used all output tokens on reasoning without producing a visible response. Continue.' }],
+        content: [
+          ...overflowToolResults,
+          { type: 'text', text: 'Your previous response used all output tokens on reasoning without producing a visible response. Continue.' },
+        ],
       })
       yield { type: 'state_changed' }
       yield* this._doStream(executeTool)
