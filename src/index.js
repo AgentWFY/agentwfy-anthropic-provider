@@ -412,7 +412,14 @@ class AnthropicSession {
   }
 
   async *retry(executeTool) {
-    this._discardPartialAssistant()
+    // Only clean up display state from the failed attempt.
+    // Preserve completed provider messages (assistant + tool_result pairs) so
+    // the model continues from where it left off instead of redoing work.
+    if (this._partialAssistantMsg) {
+      const idx = this._displayMessages.indexOf(this._partialAssistantMsg)
+      if (idx !== -1) this._displayMessages.splice(idx, 1)
+      this._partialAssistantMsg = null
+    }
     yield* this._doStream(executeTool)
   }
 
@@ -559,17 +566,21 @@ class AnthropicSession {
       if (idx !== -1) this._displayMessages.splice(idx, 1)
       this._partialAssistantMsg = null
     }
-    // Remove trailing assistant messages and their tool_result user messages
-    while (this._messages.length > 0) {
-      const last = this._messages[this._messages.length - 1]
-      if (last.role === 'assistant') {
-        this._messages.pop()
-      } else if (last.role === 'user' && Array.isArray(last.content)
-        && last.content.every(b => b.type === 'tool_result')) {
-        this._messages.pop()
-      } else {
-        break
-      }
+    // Remove only the last (incomplete) assistant turn from provider messages.
+    // One turn = one assistant message + one optional trailing tool_result user message.
+    // Earlier completed turns are preserved.
+    if (this._messages.length === 0) return
+
+    let last = this._messages[this._messages.length - 1]
+    if (last.role === 'user' && Array.isArray(last.content)
+      && last.content.length > 0
+      && last.content.every(b => b.type === 'tool_result')) {
+      this._messages.pop()
+      if (this._messages.length === 0) return
+      last = this._messages[this._messages.length - 1]
+    }
+    if (last.role === 'assistant') {
+      this._messages.pop()
     }
   }
 
