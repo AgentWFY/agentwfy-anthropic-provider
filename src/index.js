@@ -4,9 +4,23 @@
  */
 
 const PROVIDER_ID = 'anthropic'
-const DEFAULT_MODEL_ID = 'claude-sonnet-4-6'
+const DEFAULT_MODEL_ID = 'claude-opus-4-7'
 const TITLE_MODEL_ID = 'claude-haiku-4-5'
 const DEFAULT_BASE_URL = 'https://api.anthropic.com'
+
+const EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
+const MODELS_SUPPORTING_EFFORT = new Set([
+  'claude-opus-4-7',
+  'claude-opus-4-6',
+  'claude-sonnet-4-6',
+  'claude-opus-4-5',
+])
+const MODELS_SUPPORTING_XHIGH = new Set(['claude-opus-4-7'])
+
+function defaultEffortForModel(modelId) {
+  if (modelId === 'claude-opus-4-7') return 'xhigh'
+  return 'high'
+}
 
 const TOKEN_URL = 'https://platform.claude.com/v1/oauth/token'
 const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'
@@ -19,6 +33,7 @@ const TOKEN_HEADERS = {
 const CONFIG_KEYS = {
   modelId: 'plugin.anthropic-provider.model-id',
   maxTokens: 'plugin.anthropic-provider.max-tokens',
+  effort: 'plugin.anthropic-provider.effort',
   oauthAccess: 'plugin.anthropic-provider.oauth-access',
   oauthRefresh: 'plugin.anthropic-provider.oauth-refresh',
   oauthExpires: 'plugin.anthropic-provider.oauth-expires',
@@ -756,6 +771,13 @@ class AnthropicSession {
     body.tools = convertTools(this._config.tools)
     body.thinking = { type: 'adaptive' }
 
+    if (MODELS_SUPPORTING_EFFORT.has(modelId)) {
+      let effort = this._providerConfig.effort || defaultEffortForModel(modelId)
+      if (!EFFORT_LEVELS.has(effort)) effort = defaultEffortForModel(modelId)
+      if (effort === 'xhigh' && !MODELS_SUPPORTING_XHIGH.has(modelId)) effort = 'high'
+      body.output_config = { effort }
+    }
+
     yield { type: 'status_line', text: this._buildStatusLine() }
 
     const bodyJson = JSON.stringify(body)
@@ -1148,9 +1170,11 @@ class AnthropicSession {
 
 function createFactory(getConfig, setConfig) {
   function readProviderConfig() {
+    const modelId = getConfig(CONFIG_KEYS.modelId, DEFAULT_MODEL_ID)
     return {
-      modelId: getConfig(CONFIG_KEYS.modelId, DEFAULT_MODEL_ID),
+      modelId,
       maxTokens: parseInt(getConfig(CONFIG_KEYS.maxTokens, '16384'), 10) || 16384,
+      effort: getConfig(CONFIG_KEYS.effort, defaultEffortForModel(modelId)),
       hideThinking: getConfig(CONFIG_KEYS.hideThinking, 'false') === 'true',
       hideIntermediateSteps: getConfig(CONFIG_KEYS.hideIntermediateSteps, 'false') === 'true',
       getApiKey: () => getApiKey(getConfig, setConfig),

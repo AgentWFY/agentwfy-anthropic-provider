@@ -16,13 +16,18 @@
   },
   {
     "name": "plugin.anthropic-provider.model-id",
-    "value": "claude-sonnet-4-6",
-    "description": "Model ID (default: claude-sonnet-4-6)"
+    "value": "claude-opus-4-7",
+    "description": "Model ID (default: claude-opus-4-7)"
   },
   {
     "name": "plugin.anthropic-provider.max-tokens",
     "value": "16384",
     "description": "Max output tokens (default: 16384)"
+  },
+  {
+    "name": "plugin.anthropic-provider.effort",
+    "value": "xhigh",
+    "description": "Effort level: low, medium, high, xhigh (Opus 4.7 only), max (default: xhigh)"
   },
   {
     "name": "plugin.anthropic-provider.hide-thinking",

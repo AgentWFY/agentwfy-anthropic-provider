@@ -167,6 +167,7 @@
   <div class="section">
     <div class="section-label">Model</div>
     <select id="modelId" style="width:100%">
+      <option value="claude-opus-4-7">Claude Opus 4.7</option>
       <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
       <option value="claude-opus-4-6">Claude Opus 4.6</option>
       <option value="claude-sonnet-4-5">Claude Sonnet 4.5</option>
@@ -176,6 +177,20 @@
       <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
       <option value="claude-3-7-sonnet-latest">Claude Sonnet 3.7</option>
       <option value="claude-3-5-haiku-latest">Claude Haiku 3.5</option>
+    </select>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Effort -->
+  <div class="section">
+    <div class="section-label">Effort</div>
+    <select id="effort" style="width:100%">
+      <option value="low">Low</option>
+      <option value="medium">Medium</option>
+      <option value="high">High</option>
+      <option value="xhigh">Extra High (Opus 4.7 only)</option>
+      <option value="max">Max</option>
     </select>
   </div>
 
@@ -213,6 +228,7 @@
     const KEYS = {
       modelId: 'plugin.anthropic-provider.model-id',
       maxTokens: 'plugin.anthropic-provider.max-tokens',
+      effort: 'plugin.anthropic-provider.effort',
       oauthAccess: 'plugin.anthropic-provider.oauth-access',
       oauthRefresh: 'plugin.anthropic-provider.oauth-refresh',
       oauthExpires: 'plugin.anthropic-provider.oauth-expires',
@@ -410,6 +426,9 @@
     $('#modelId').addEventListener('change', async () => {
       if (await saveValue(KEYS.modelId, $('#modelId').value)) showStatus('Saved', 'success');
     });
+    $('#effort').addEventListener('change', async () => {
+      if (await saveValue(KEYS.effort, $('#effort').value)) showStatus('Saved', 'success');
+    });
     $('#saveMaxTokens').addEventListener('click', async () => {
       const val = parseInt($('#maxTokens').value, 10);
       if (await saveValue(KEYS.maxTokens, isNaN(val) ? 16384 : val)) showStatus('Saved', 'success');
@@ -434,6 +453,7 @@
           const val = row.value;
           if (row.name === KEYS.modelId) $('#modelId').value = val;
           else if (row.name === KEYS.maxTokens) $('#maxTokens').value = val || 16384;
+          else if (row.name === KEYS.effort) $('#effort').value = val;
           else if (row.name === KEYS.hideThinking) $('#hideThinking').checked = val === 'true';
           else if (row.name === KEYS.hideIntermediateSteps) $('#hideIntermediateSteps').checked = val === 'true';
         }
