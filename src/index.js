@@ -484,7 +484,15 @@ class AnthropicSession {
   // ── Private helpers ──
 
   _buildStatusLine() {
-    const parts = [formatModelName(this._providerConfig.modelId)]
+    const modelId = this._providerConfig.modelId
+    let modelLabel = formatModelName(modelId)
+    if (MODELS_SUPPORTING_EFFORT.has(modelId)) {
+      let effort = this._providerConfig.effort || defaultEffortForModel(modelId)
+      if (!EFFORT_LEVELS.has(effort)) effort = defaultEffortForModel(modelId)
+      if (effort === 'xhigh' && !MODELS_SUPPORTING_XHIGH.has(modelId)) effort = 'high'
+      modelLabel += ' (' + effort + ')'
+    }
+    const parts = [modelLabel]
     if (this._lastInputTokens > 0) {
       const contextSize = this._lastInputTokens + this._lastOutputTokens
       parts.push('ctx: ' + formatTokens(contextSize))
