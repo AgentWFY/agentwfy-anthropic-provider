@@ -4,21 +4,22 @@
  */
 
 const PROVIDER_ID = 'anthropic'
-const DEFAULT_MODEL_ID = 'claude-opus-4-7'
+const DEFAULT_MODEL_ID = 'claude-opus-4-8'
 const TITLE_MODEL_ID = 'claude-haiku-4-5'
 const DEFAULT_BASE_URL = 'https://api.anthropic.com'
 
 const EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
 const MODELS_SUPPORTING_EFFORT = new Set([
+  'claude-opus-4-8',
   'claude-opus-4-7',
   'claude-opus-4-6',
   'claude-sonnet-4-6',
   'claude-opus-4-5',
 ])
-const MODELS_SUPPORTING_XHIGH = new Set(['claude-opus-4-7'])
+const MODELS_SUPPORTING_XHIGH = new Set(['claude-opus-4-8', 'claude-opus-4-7'])
 
 function defaultEffortForModel(modelId) {
-  if (modelId === 'claude-opus-4-7') return 'xhigh'
+  if (MODELS_SUPPORTING_XHIGH.has(modelId)) return 'xhigh'
   return 'high'
 }
 
