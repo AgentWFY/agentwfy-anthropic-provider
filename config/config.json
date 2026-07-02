@@ -27,7 +27,7 @@
   {
     "name": "plugin.anthropic-provider.effort",
     "value": "xhigh",
-    "description": "Effort level: low, medium, high, xhigh (Opus 4.7/4.8 only), max (default: xhigh)"
+    "description": "Effort level: low, medium, high, xhigh (Fable 5 / Opus 4.7 / 4.8 only), max (default: xhigh)"
   },
   {
     "name": "plugin.anthropic-provider.hide-thinking",

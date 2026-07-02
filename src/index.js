@@ -10,13 +10,14 @@ const DEFAULT_BASE_URL = 'https://api.anthropic.com'
 
 const EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
 const MODELS_SUPPORTING_EFFORT = new Set([
+  'claude-fable-5',
   'claude-opus-4-8',
   'claude-opus-4-7',
   'claude-opus-4-6',
   'claude-sonnet-4-6',
   'claude-opus-4-5',
 ])
-const MODELS_SUPPORTING_XHIGH = new Set(['claude-opus-4-8', 'claude-opus-4-7'])
+const MODELS_SUPPORTING_XHIGH = new Set(['claude-fable-5', 'claude-opus-4-8', 'claude-opus-4-7'])
 
 function defaultEffortForModel(modelId) {
   if (MODELS_SUPPORTING_XHIGH.has(modelId)) return 'xhigh'
@@ -286,9 +287,17 @@ function formatTokens(tokens) {
 
 function formatModelName(modelId) {
   const match = modelId.match(/claude-(\w+)-(\d+)-(\d+)/)
-  if (!match) return modelId
-  const name = match[1].charAt(0).toUpperCase() + match[1].slice(1)
-  return name + ' ' + match[2] + '.' + match[3]
+  if (match) {
+    const name = match[1].charAt(0).toUpperCase() + match[1].slice(1)
+    return name + ' ' + match[2] + '.' + match[3]
+  }
+  // Single-version ids like claude-fable-5 → "Fable 5"
+  const single = modelId.match(/^claude-([a-z]+)-(\d+)$/)
+  if (single) {
+    const name = single[1].charAt(0).toUpperCase() + single[1].slice(1)
+    return name + ' ' + single[2]
+  }
+  return modelId
 }
 
 function addCacheBreakpoints(messages) {
@@ -1014,6 +1023,17 @@ class AnthropicSession {
     }
 
     if (signal.aborted) return
+
+    // Safety classifiers (notably on Fable 5) can decline a request: HTTP 200
+    // with stop_reason 'refusal'. Surface it instead of ending the turn with an
+    // empty response. Discard any partial output — history stays clean because
+    // we throw before appending the assistant message.
+    if (stopReason === 'refusal') {
+      throw new ProviderError(
+        'Request declined by Anthropic safety classifiers (stop_reason: refusal). Rephrase the request or switch models in provider settings.',
+        'invalid_request',
+      )
+    }
 
     // Detect max_tokens exhaustion on thinking with no usable output
     if (stopReason === 'max_tokens' && !assistantText && pendingTools.length === 0) {

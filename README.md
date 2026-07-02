@@ -17,8 +17,8 @@ Open the Plugins view in AgentWFY, find "anthropic-provider" in the registry, an
 - **Streaming** — Real-time streaming of model responses.
 - **Extended thinking** — Adaptive thinking mode for complex reasoning.
 - **Cache control** — Ephemeral cache breakpoints for token efficiency.
-- **Model selection** — Choose from Claude Opus 4.8, Opus 4.7, Sonnet 4.6, Opus 4.6, Sonnet 4.5, Opus 4.5, Sonnet 4, Opus 4, Haiku 4.5, Sonnet 3.7, and Haiku 3.5.
-- **Effort control** — Tune reasoning depth via `low` / `medium` / `high` / `xhigh` / `max` (xhigh is Opus 4.7/4.8 only).
+- **Model selection** — Choose from Claude Fable 5, Opus 4.8, Opus 4.7, Sonnet 4.6, Opus 4.6, Sonnet 4.5, Opus 4.5, Sonnet 4, Opus 4, Haiku 4.5, Sonnet 3.7, and Haiku 3.5.
+- **Effort control** — Tune reasoning depth via `low` / `medium` / `high` / `xhigh` / `max` (xhigh is Fable 5 / Opus 4.7 / 4.8 only).
 
 ## Settings
 
