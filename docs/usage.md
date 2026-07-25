@@ -10,8 +10,8 @@ Uses OAuth 2.0 with PKCE to authenticate with your Claude Pro or Max subscriptio
 
 All settings are accessible from the provider settings view:
 
-- **Model** — Select a Claude model (default: `claude-opus-4-8`). Available models: Fable 5, Opus 4.8, Opus 4.7, Sonnet 4.6, Opus 4.6, Sonnet 4.5, Opus 4.5, Sonnet 4, Opus 4, Haiku 4.5, Sonnet 3.7, Haiku 3.5.
-- **Effort** — Controls reasoning depth and token spend on supported models (Fable 5, Opus 4.8, Opus 4.7, Opus 4.6, Sonnet 4.6, Opus 4.5). Values: `low`, `medium`, `high`, `xhigh` (Fable 5 / Opus 4.7 / 4.8 only), `max`. Default: `xhigh` for Fable 5 / Opus 4.8 / Opus 4.7, `high` otherwise.
+- **Model** — Select a Claude model (default: `claude-opus-5`). Available models: Fable 5, Opus 5, Opus 4.8, Opus 4.7, Sonnet 4.6, Opus 4.6, Sonnet 4.5, Opus 4.5, Sonnet 4, Opus 4, Haiku 4.5, Sonnet 3.7, Haiku 3.5.
+- **Effort** — Controls reasoning depth and token spend on supported models (Fable 5, Opus 5, Opus 4.8, Opus 4.7, Opus 4.6, Sonnet 4.6, Opus 4.5). Values: `low`, `medium`, `high`, `xhigh` (Fable 5 / Opus 5 / 4.8 / 4.7 only), `max`. Default: `xhigh` for Fable 5 / Opus 5 / Opus 4.8 / Opus 4.7, `high` otherwise.
 - **Max Output Tokens** — Maximum tokens the model can generate per response (default: 16384).
 - **Hide Thinking** — Hide Claude's thinking/reasoning messages from the chat.
 - **Hide Intermediate Steps** — Show only the final assistant response, hiding intermediate tool calls.

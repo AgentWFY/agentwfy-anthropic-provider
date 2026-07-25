@@ -16,8 +16,8 @@
   },
   {
     "name": "plugin.anthropic-provider.model-id",
-    "value": "claude-opus-4-8",
-    "description": "Model ID (default: claude-opus-4-8)"
+    "value": "claude-opus-5",
+    "description": "Model ID (default: claude-opus-5)"
   },
   {
     "name": "plugin.anthropic-provider.max-tokens",
@@ -27,7 +27,7 @@
   {
     "name": "plugin.anthropic-provider.effort",
     "value": "xhigh",
-    "description": "Effort level: low, medium, high, xhigh (Fable 5 / Opus 4.7 / 4.8 only), max (default: xhigh)"
+    "description": "Effort level: low, medium, high, xhigh (Fable 5 / Opus 5 / 4.8 / 4.7 only), max (default: xhigh)"
   },
   {
     "name": "plugin.anthropic-provider.hide-thinking",
