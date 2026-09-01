@@ -71,6 +71,129 @@ function fileToAnthropicBlock(file) {
   return null
 }
 
+// ── Image downscaling ──
+//
+// A request carrying more than 20 images must keep every one of them within
+// 2000px per side — including images nested in tool_result blocks and every
+// image resent from earlier turns. `capturePage` screenshots arrive at device
+// pixel resolution (a retina window is ~4358x2710), so a long session quietly
+// accumulates oversized images and then 400s the moment the 21st image lands.
+// That poisons the whole session: the bad images sit in persisted history, so
+// every later request — retries included — fails the same way.
+//
+// Cap the long edge on every request instead. Claude downscales anything past
+// its resolution tier (2576px on 4.7+) server-side anyway, so the fidelity
+// cost is small, the token cost drops, and the request stays legal no matter
+// how many images it carries. The cap is applied to `_messages` in place, so
+// each image is resized once and sessions already holding oversized images
+// repair themselves on their next turn.
+
+const MAX_IMAGE_EDGE = 2000
+
+let _nativeImage
+function getNativeImage() {
+  if (_nativeImage === undefined) {
+    try {
+      _nativeImage = require('electron').nativeImage
+    } catch {
+      _nativeImage = null
+    }
+  }
+  return _nativeImage
+}
+
+/** Pixel dimensions from a base64 image header, without decoding the bitmap.
+ *  Covers PNG and JPEG; null for anything else. */
+function imageSizeFromHeader(data) {
+  let head
+  try {
+    head = Buffer.from(data.slice(0, 4096), 'base64')
+  } catch {
+    return null
+  }
+
+  // PNG: IHDR carries width/height at bytes 16..24.
+  if (head.length >= 24 && head.readUInt32BE(0) === 0x89504e47) {
+    return { width: head.readUInt32BE(16), height: head.readUInt32BE(20) }
+  }
+
+  // JPEG: walk the segment headers to the start-of-frame marker.
+  if (head.length >= 4 && head[0] === 0xff && head[1] === 0xd8) {
+    let i = 2
+    while (i + 9 < head.length) {
+      if (head[i] !== 0xff) { i++; continue }
+      const marker = head[i + 1]
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        return { height: head.readUInt16BE(i + 5), width: head.readUInt16BE(i + 7) }
+      }
+      i += 2 + head.readUInt16BE(i + 2)
+    }
+  }
+
+  return null
+}
+
+/** Shrink an oversized image block in place. Returns true if it was resized. */
+function downscaleImageBlock(block) {
+  const source = block.source
+  if (!source || source.type !== 'base64' || typeof source.data !== 'string') return false
+
+  const header = imageSizeFromHeader(source.data)
+  if (header) {
+    if (header.width <= MAX_IMAGE_EDGE && header.height <= MAX_IMAGE_EDGE) return false
+  } else if (source.data.length <= 64 * 1024) {
+    // Unreadable header (GIF/WebP) and too small to plausibly break the limit —
+    // not worth a full decode on every turn.
+    return false
+  }
+
+  const nativeImage = getNativeImage()
+  if (!nativeImage) return false
+
+  try {
+    const image = nativeImage.createFromBuffer(Buffer.from(source.data, 'base64'))
+    if (image.isEmpty()) return false
+
+    const { width, height } = image.getSize()
+    const longEdge = Math.max(width, height)
+    if (longEdge <= MAX_IMAGE_EDGE) return false
+
+    const scale = MAX_IMAGE_EDGE / longEdge
+    const resized = image.resize({
+      width: Math.max(1, Math.round(width * scale)),
+      height: Math.max(1, Math.round(height * scale)),
+      quality: 'good',
+    })
+
+    const asJpeg = source.media_type === 'image/jpeg'
+    const buffer = asJpeg ? resized.toJPEG(90) : resized.toPNG()
+    if (!buffer || buffer.length === 0) return false
+
+    source.data = buffer.toString('base64')
+    source.media_type = asJpeg ? 'image/jpeg' : 'image/png'
+    return true
+  } catch (err) {
+    console.error('[anthropic-provider] Image downscale failed:', err)
+    return false
+  }
+}
+
+/** Visit every image block, including those nested in tool results. */
+function forEachImageBlock(messages, visit) {
+  for (const msg of messages) {
+    if (!Array.isArray(msg.content)) continue
+    for (const block of msg.content) {
+      if (block.type === 'image') {
+        visit(block)
+      } else if (block.type === 'tool_result' && Array.isArray(block.content)) {
+        for (const inner of block.content) {
+          if (inner.type === 'image') visit(inner)
+        }
+      }
+    }
+  }
+}
+
 // ── ProviderError ──
 
 class ProviderError extends Error {
@@ -431,6 +554,20 @@ class AnthropicSession {
     return modified
   }
 
+  /** Cap every image in history at MAX_IMAGE_EDGE. Mutates `_messages`, so the
+   *  smaller image is what gets persisted and each one is only resized once.
+   *  Display messages keep their own full-resolution copy. */
+  _downscaleImages() {
+    let resized = 0
+    forEachImageBlock(this._messages, block => {
+      if (downscaleImageBlock(block)) resized++
+    })
+    if (resized > 0) {
+      console.log(`[anthropic-provider] Downscaled ${resized} image(s) to ${MAX_IMAGE_EDGE}px`)
+    }
+    return resized
+  }
+
   async *stream(input, executeTool) {
     this._addUserMessage(input.text, input.files)
     yield { type: 'state_changed' }
@@ -776,6 +913,8 @@ class AnthropicSession {
       { type: 'text', text: "You are Claude Code, Anthropic's official CLI for Claude." },
       { type: 'text', text: this._config.systemPrompt, cache_control: { type: 'ephemeral', ttl: '1h' } },
     ]
+
+    this._downscaleImages()
 
     // Deep-copy messages for cache breakpoint mutation
     const convertedMessages = this._messages.map(m => ({

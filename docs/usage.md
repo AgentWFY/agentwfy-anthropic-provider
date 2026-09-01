@@ -21,5 +21,6 @@ All settings are accessible from the provider settings view:
 - **Streaming** — Real-time streaming of model responses via SSE.
 - **Extended Thinking** — Adaptive thinking mode for complex reasoning tasks.
 - **Cache Control** — Ephemeral cache breakpoints on the latest user message for token efficiency.
+- **Image Downscaling** — Images in history are capped at 2000px per side, keeping screenshot-heavy sessions within Anthropic's limit for requests carrying more than 20 images.
 - **Token Display** — Input token count shown in the status line.
 - **Auto Token Refresh** — OAuth tokens are refreshed automatically before expiry.
